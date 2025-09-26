@@ -1,8 +1,8 @@
 # Architecture
 You can be sure that every arrow in this graph has at least one App configuration or WMC script.
-How to watch: Jellyfin Client > DuckDNS > Router > Nginx > Jellyfin Server
-Manage media: Jellyfin Server > Jellyseerr > Radarr & Sonarr > Jellyfin Server
-New media requests: JellySeerr > Qbit > Radarr & Sonarr > WMC
+- How to watch: Jellyfin Client > DuckDNS > Router > Nginx > Jellyfin Server
+- Manage media: Jellyfin Server > Jellyseerr > Radarr & Sonarr > Jellyfin Server
+- New media requests: JellySeerr > Qbit > Radarr & Sonarr > WMC
 
 # Apps
 Everything below "Router" in this list can be a container, and boy do I recommend it.
