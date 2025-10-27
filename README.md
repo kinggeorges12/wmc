@@ -60,7 +60,6 @@ You can be sure that every arrow in this graph has at least one App configuratio
 │                       └──────────→ Jellyfin Server (again)          │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
-* Use JellyBridge plugin or the CustomTabs/Jellyseerr-Nginx implementation, but hey you know you want to use my Jellyfin plugin.
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    REQUEST FLOW (New Content)                       │
@@ -79,6 +78,8 @@ You can be sure that every arrow in this graph has at least one App configuratio
 - **Watch Flow**: Users access media through Jellyfin clients
 - **Manage Flow**: Media library organization via Arr apps
 - **Request Flow**: Automated download and processing of new media
+
+*Note: Use JellyBridge plugin or the CustomTabs/Jellyseerr-Nginx implementation, but hey you know you want to use my Jellyfin plugin.
 
 # Apps
 Everything below "Router" in this list can be a container, and boy do I recommend it.
