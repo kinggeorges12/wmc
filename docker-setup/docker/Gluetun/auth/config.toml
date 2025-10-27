@@ -1,0 +1,12 @@
+[[roles]]
+name = "qbittorrent"
+# Define a list of routes with the syntax "Http-Method /path"
+routes = [
+  "GET /v1/dns/status",
+  "GET /v1/vpn/status", 
+  "GET /v1/openvpn/portforwarded"
+]
+# Define an authentication method with its parameters
+auth = "basic"
+username = "gluetun"
+password = "***REMOVED: same as gluetun healthcheck***"

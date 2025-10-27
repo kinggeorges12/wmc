@@ -1,0 +1,16 @@
+{
+    "Movies": {
+      "Url": "http://localhost:7878",
+      "ApiKey": "***REMOVED: get this from Radarr App front-end***",
+      "Endpoint": "movie",
+      "ProperName": "Movie",
+      "ProperNames": "Movie(s)"
+    },
+    "TV": {
+      "Url": "http://localhost:8989",
+      "ApiKey": "***REMOVED: get this from Sonarr App front-end***",
+      "Endpoint": "series",
+      "ProperName": "Show",
+      "ProperNames": "Show(s)"
+    }
+}

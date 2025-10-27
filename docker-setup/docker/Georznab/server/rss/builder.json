@@ -1,0 +1,24 @@
+{
+    "Movies": {
+      "Url": "http://host.docker.internal:7878",
+      "ApiKey": "***REMOVED: get this from Radarr App front-end***",
+      "Endpoint": "movie",
+      "ProperName": "Movie",
+      "ProperNames": "Movie(s)"
+    },
+    "TV": {
+      "Url": "http://host.docker.internal:8989",
+      "ApiKey": "***REMOVED: get this from Sonarr App front-end***",
+      "Endpoint": "series",
+      "ProperName": "Show",
+      "ProperNames": "Show(s)"
+    },
+    "qBit": {
+      "QUrl": "http://host.docker.internal:8090",
+      "QUsername": "qbit",
+      "QPassword": "***REMOVED: same as QBIT_PASS in docker-compose-download.yml***",
+      "Trackers": {
+        "Torrenting": "torrenting.com"
+      }
+    }
+}

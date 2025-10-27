@@ -1,0 +1,209 @@
+version: "3.9"
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: 0:0
+    environment:
+      - PUID=0 #1100
+      - PGID=0 #2000
+      - UMASK=002
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+      - TZ=Etc/GMT
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyfin/.config
+        target: /config
+        consistency: consistent
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyfin/Cache
+        target: /cache
+        consistency: delegated # Docker-side files win
+      - type: bind
+        source: /host_mnt/e/Downloads/Sync/TV
+        target: /data/TV
+        consistency: cached # Windows-side files win
+        read_only: true
+      - type: bind
+        source: /host_mnt/e/Downloads/Sync/Movies
+        target: /data/Movies
+        consistency: cached # Windows-side files win
+        read_only: true
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyfin/JellyBridge
+        target: /data/JellyBridge
+    # Optional - may be necessary for docker healthcheck to pass if running in host network mode
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - 8096:8096
+    restart: always
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  sonarr:
+    image: ghcr.io/hotio/sonarr:latest
+    container_name: sonarr
+    user: 0:0
+    environment:
+      - PUID=0 #1200
+      - PGID=0 #2000
+      - UMASK=002
+      - TZ=Etc/GMT
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Sonarr/.config
+        target: /config
+      - type: bind
+        source: /host_mnt/e/Downloads/.Trash-0/Sonarr
+        target: /recycling
+      - type: bind
+        source: /host_mnt/e/Downloads/Sync
+        target: /data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8989 | grep -qE '302|200' || exit 1"]
+      start_period: 20s
+      interval: 300s
+      timeout: 15s
+      retries: 10
+    extra_hosts:
+      - "jackett:172.17.0.1"
+    ports:
+      - 8989:8989
+    restart: always
+
+  radarr:
+    image: ghcr.io/hotio/radarr:latest
+    container_name: radarr
+    user: 0:0
+    environment:
+      - PUID=0 #1300
+      - PGID=0 #2000
+      - UMASK=002
+      - TZ=Etc/GMT
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Radarr/.config
+        target: /config
+      - type: bind
+        source: /host_mnt/e/Downloads/.Trash-0/Radarr/
+        target: /recycling
+      - type: bind
+        source: /host_mnt/e/Downloads/Sync
+        target: /data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:7878 | grep -qE '302|200' || exit 1"]
+      start_period: 20s
+      interval: 300s
+      timeout: 15s
+      retries: 10
+    extra_hosts:
+      - "jackett:172.17.0.1"
+    ports:
+      - 7878:7878
+    restart: always
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      - PUID=0 #1400
+      - PGID=0 #2000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - LOG_LEVEL=debug
+      - PORT=5055 #optional
+    ports:
+      - 5055:5055
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyseerr/config
+        target: /app/config
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyseerr/home
+        target: /home
+        read_only: true
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/status || exit 1
+      start_period: 20s
+      interval: 300s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  jellyseerr-nginx:
+    image: openresty/openresty:alpine-fat
+    container_name: jellyseerr-nginx
+    ports:
+      - 5056:80
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyseerr/nginx/default.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyseerr/nginx/nginx.conf
+        target: /usr/local/openresty/nginx/conf/nginx.conf
+        read_only: true
+      - type: bind
+        source: /host_mnt/c/Docker/Jellyseerr/home
+        target: /home
+        read_only: true
+    command: >
+        sh -c "
+        if ! /usr/local/openresty/luajit/bin/luajit -e 'require(\"resty.http\")' >/dev/null 2>&1; then
+            /usr/local/openresty/luajit/bin/luarocks install lua-resty-http;
+        fi;
+        if ! /usr/local/openresty/luajit/bin/luajit -e 'require(\"resty.openssl.x509\")' >/dev/null 2>&1; then
+            /usr/local/openresty/luajit/bin/luarocks install lua-resty-openssl;
+        fi;
+        /usr/local/openresty/bin/openresty -g 'daemon off;'"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:80 || exit 1"] # healthy if http code <400
+      start_period: 20s
+      interval: 300s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  georznab:
+    image: python:3.11-slim
+    container_name: georznab
+    environment:
+      SETTINGS_JSON: "/app/config/settings.json"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "9118:80"
+    volumes:
+      # Writing API Keys to settings file
+      - type: bind
+        source: /host_mnt/c/Docker/Georznab/.config
+        target: /app/config
+      # Writing RSS feed
+      - type: bind
+        source: /host_mnt/c/Docker/Georznab/data
+        target: /app/data
+      - type: bind
+        source: /host_mnt/c/Docker/Georznab/server
+        target: /app/server
+        read_only: true
+    command: >
+      bash -c "cd /app/server &&
+               pip install --upgrade pip &&
+               pip install feedgen fastapi uvicorn httpx filelock && 
+               uvicorn run:app --host 0.0.0.0 --port 80"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import http.client; conn = http.client.HTTPConnection(\"localhost\", 80); conn.request(\"GET\", \"/status\"); r = conn.getresponse(); exit(0 if r.status < 400 else 1)'"]
+      start_period: 20s
+      interval: 300s
+      timeout: 15s
+      retries: 10
+    restart: always

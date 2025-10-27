@@ -1,0 +1,5 @@
+# Security-sensitive files
+github-token.txt
+password.txt
+*.password
+*password.txt

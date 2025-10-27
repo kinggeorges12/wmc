@@ -1,0 +1,8 @@
+{
+    "Jellyseerr": {
+      "Url": "http://localhost:5055",
+      "External": "Jellyfin",
+      "Email": "***REMOVED: this is the email for the admin user in Jellyseerr, used in API calls***",
+      "PasswordFile": "C:/Docker/Jellyseerr/home/password.txt"
+    }
+}

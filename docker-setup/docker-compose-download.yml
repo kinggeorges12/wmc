@@ -1,0 +1,380 @@
+version: "3.9"
+
+networks:
+  # Connects flaresolverr to gluetun to allow communication between qbit and jackett
+  bridge_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.69.0.0/24 # Any /24 CIDR address in Docker uses up to 172.69.255.255
+
+services:
+  # Connection for qbit
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun0
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - PUID=0 #100
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - HTTP_CONTROL_SERVER=on # https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/control-server.md
+      - HTTP_CONTROL_SERVER_ADDRESS=:8010
+      - VPN_SERVICE_PROVIDER==***REMOVED: VPN service name (probably not important)***
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=***REMOVED: Get from VPN provider***
+      - WIREGUARD_MTU=1320 # default MTU is 1320
+      - SERVER_COUNTRIES=Netherlands # Because most torrents are hosted in this country
+      - UPDATER_PERIOD=24h # https://github.com/qdm12/gluetun-wiki/blob/main/setup/servers.md#update-the-vpn-servers-list
+      - DOT=off # Disable DNS over TLS
+      - BLOCK_MALICIOUS=off # Disable malicious domain blocking
+      - BLOCK_SURVEILLANCE=off # Disable surveillance domain blocking
+      - BLOCK_ADS=off # Disable ad blocking
+    networks:
+      bridge_net:
+        ipv4_address: 172.69.0.2
+    extra_hosts:
+      - "jackett:172.69.0.3"
+    ports:
+      - 8090:8090 # port for qbittorrent
+      - 8010:8010/tcp # Built-in HTTP control server
+    volumes:
+      - type: bind
+        source: C:\Docker\Gluetun\auth\config.toml
+        target: /gluetun/auth/config.toml
+        read_only: true
+      - type: bind # https://github.com/qdm12/gluetun-wiki/blob/main/setup/advanced/wireguard.md
+        source: /lib/modules
+        target: /lib/modules
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- --auth-no-challenge --user=gluetun --password=***REMOVED: same as gluetun toml*** http://localhost:8010/v1/vpn/status | grep -q '\"status\":\"running\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    user: 0:0
+    environment:
+      - PUID=0 #200
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - WEBUI_PORT=8090
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/qBittorrent/.config
+        target: /config
+      - type: bind
+        source: /host_mnt/c/***REMOVED: backup location***/Torrents
+        target: /data/cloud
+      - type: bind
+        source: /host_mnt/d/Docker/qBittorrent/Import
+        target: /data/import
+      - type: bind
+        source: /host_mnt/d/Docker/qBittorrent/Torrents
+        target: /data/torrents
+      - type: bind
+        source: /host_mnt/d/Docker/qBittorrent/Temp
+        target: /data/temp
+      - type: bind
+        source: /host_mnt/d/Docker/qBittorrent/Incomplete
+        target: /downloads/incomplete
+      - type: bind
+        source: /host_mnt/e/Downloads/Library
+        target: /downloads/completed
+    network_mode: service:gluetun # https://github.com/qdm12/gluetun-wiki/blob/main/setup/connect-a-container-to-gluetun.md#external-container-to-gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090"]
+      interval: 60s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  # Keeps an active gluetun connection by restarting when qbit download speed and DHT nodes hit zero.
+  watchdog:
+    image: alpine:latest
+    container_name: watchdog
+    environment:
+      - PUID=0 #300
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: /etc/localtime
+        target: /etc/localtime
+        read_only: true
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache curl jq docker-cli tzdata
+        INTERNET_PING=https://perdu.com
+        INTERNET_SLEEP_INTERVAL=10
+        INTERNET_SLEEP_ERROR=120
+        QBIT_HOST=host.docker.internal
+        QBIT_PORT=8090
+        QBIT_USER=qbit
+        QBIT_PASS=***REMOVED: same as QBIT_PASS in the qbittorrent service***
+        CURL_TIMEOUT_API=30
+        CURL_TIMEOUT_AUTH=10
+        GLUETUN_ERROR_COUNT=0
+        GLUETUN_MAX_ERRORS=5 # 5 minutes until restart gluetun0
+        GLUETUN_SLEEP_INTERVAL=60
+        API_ERROR_COUNT=0
+        API_MAX_ERRORS=60 # 15 minutes until restart qbit
+        API_SLEEP_INTERVAL=15
+        CPU_ERROR_COUNT=0
+        CPU_MAX_PERCENT=99.0
+        CPU_MAX_ERRORS=360 # 60 minutes until restart qbit
+        CPU_SLEEP_INTERVAL=10
+        internet_wait() {
+          INTERNET_ERROR_FLAG=0
+          while true; do
+            if curl -s -o /dev/null -w "%{http_code}" "$$INTERNET_PING" | grep -q "^200$$"; then
+              echo "[OK] $$INTERNET_PING is reachable!" >&2
+              break
+            else
+              INTERNET_ERROR_FLAG=$$((INTERNET_ERROR_FLAG + 1))
+              echo "[ERROR] $$INTERNET_PING is offline. Waiting..." >&2
+              sleep $$INTERNET_SLEEP_INTERVAL
+            fi
+          done
+          if [ "$$INTERNET_ERROR_FLAG" -ne 0 ]; then
+            echo "[ERROR] Internet disconnected $$INTERNET_ERROR_FLAG times. Waiting $$INTERNET_SLEEP_ERROR seconds..." >&2
+            sleep $$INTERNET_SLEEP_ERROR
+          fi
+          echo "$$INTERNET_ERROR_FLAG"
+        }
+        qbit_wait() {
+          CPU_ERROR_RESTART=0
+          while true; do
+            cpu_str=$$(docker stats qbittorrent --no-stream --format "{{.CPUPerc}}")
+            cpu_val=$$(echo "$$cpu_str" | tr -d '%')
+            cpu_high=$$(echo "$$cpu_val >= $$CPU_MAX_PERCENT" | bc)
+            if [ "$$cpu_high" -eq 0 ]; then
+              echo "[OK] CPU usage is under $$CPU_MAX_PERCENT%: $$cpu_val%" >&2
+              CPU_ERROR_COUNT=0  # Reset after success
+              break
+            else
+              CPU_ERROR_COUNT=$((CPU_ERROR_COUNT + 1))
+              if [ "$$CPU_ERROR_COUNT" -ge "$$CPU_MAX_ERRORS" ]; then
+                CPU_ERROR_RESTART=1
+                docker restart qbittorrent
+                echo "[RESTART] CPU above $$CPU_MAX_PERCENT% for $$CPU_ERROR_COUNT checks — restarting qbittorrent..." >&2
+                CPU_ERROR_COUNT=0  # Reset after restart
+              else
+                echo "[ERROR] ($${CPU_ERROR_COUNT}/$${CPU_MAX_ERRORS} times) CPU usage is high ($$cpu_val%). Waiting..." >&2
+              fi
+              sleep $$CPU_SLEEP_INTERVAL
+            fi
+          done
+          return "$$CPU_ERROR_RESTART"
+        }
+        qbit_auth() {
+          curl --connect-timeout $$CURL_TIMEOUT_AUTH -s -i --header "Referer: http://$$QBIT_HOST:$$QBIT_PORT" \
+            --data "username=$$QBIT_USER&password=$$QBIT_PASS" \
+            "http://$$QBIT_HOST:$$QBIT_PORT/api/v2/auth/login" | \
+          awk 'BEGIN{IGNORECASE=1} /^Set-Cookie: SID=/ {
+            split($$2,a,";");
+            print a[1]
+            exit
+          }'
+        }
+        qbit_wait
+        SID=$$(qbit_auth)
+        while true; do
+          if [ "$$API_ERROR_COUNT" -ge "$$API_MAX_ERRORS" ]; then
+            echo "[RESTART] API unresponsive for $$API_MAX_ERRORS checks — restarting qbittorrent..."
+            docker restart qbittorrent
+            API_ERROR_COUNT=0
+            sleep $$API_SLEEP_INTERVAL
+          fi
+          # Make request and capture HTTP status code and body separately
+          response=$$(curl --connect-timeout $$CURL_TIMEOUT_API -s -w "\n%{http_code}" --cookie "$$SID" "http://$$QBIT_HOST:$$QBIT_PORT/api/v2/transfer/info")
+          curl_exit_code=$$?
+          # Error checking for connection timeout
+          if [ $$curl_exit_code -eq 28 ]; then
+            API_ERROR_COUNT=$$((API_ERROR_COUNT + 1))
+            echo "[WARN] ($${API_ERROR_COUNT}/$${API_MAX_ERRORS} errors) Request timed out — qbittorrent API is not responsive, retrying..."
+            qbit_wait
+            sleep $$API_SLEEP_INTERVAL
+            continue
+          fi
+          body=$$(echo "$$response" | head -n -1)
+          http_code=$$(echo "$$response" | tail -n1)
+          # Error checking for expired login
+          if [ "$$http_code" -eq 403 ]; then
+            API_ERROR_COUNT=$$((API_ERROR_COUNT + 1))
+            echo "[WARN] ($${API_ERROR_COUNT}/$${API_MAX_ERRORS} errors) 403 Forbidden — SID invalid or expired, reauthenticating..."
+            qbit_wait
+            SID=$$(qbit_auth)
+            sleep $$API_SLEEP_INTERVAL
+            continue
+          fi
+          # Extra error-checking
+          DHT=$$(echo "$$body" | jq -r .dht_nodes)
+          if [ -z "$$DHT" ] || ! echo "$$DHT" | grep -qE "^[0-9]+$$"; then
+            API_ERROR_COUNT=$$((API_ERROR_COUNT + 1))
+            echo "[WARN] ($${API_ERROR_COUNT}/$${API_MAX_ERRORS} errors) Invalid DHT value — reauthenticating..."
+            qbit_wait
+            SID=$$(qbit_auth)
+            sleep $$API_SLEEP_INTERVAL
+            continue
+          fi
+          # Extra error-checking
+          DL_SPEED=$$(echo "$$body" | jq -r .dl_info_speed)
+          if [ -z "$$DL_SPEED" ] || ! echo "$$DL_SPEED" | grep -qE "^[0-9]+$$"; then
+            API_ERROR_COUNT=$$((API_ERROR_COUNT + 1))
+            echo "[WARN] ($${API_ERROR_COUNT}/$${API_MAX_ERRORS} errors) Invalid DL_SPEED value — reauthenticating..."
+            qbit_wait
+            SID=$$(qbit_auth)
+            sleep $$API_SLEEP_INTERVAL
+            continue
+          fi
+          # No API-related errors
+          API_ERROR_COUNT=0
+          DL_SPEED_STRING=$$(awk -v speed="$$DL_SPEED" 'BEGIN {
+            unit="B"; val=speed;
+            if (speed >= 1024*1024*1024) {
+              val = speed / (1024*1024*1024); unit="GB";
+            } else if (speed >= 1024*1024) {
+              val = speed / (1024*1024); unit="MB";
+            } else if (speed >= 1024) {
+              val = speed / 1024; unit="KB";
+            }
+            printf "%.1f %s", val, unit;
+          }')
+          echo "[INFO] Distributed hash table (DHT) nodes: $$DHT, Download (DL) speed: $${DL_SPEED_STRING}/s"
+          # Ensure DHT value greater than 0
+          if [ "$$DHT" -eq 0 ] && [ "$$DL_SPEED" -eq 0 ]; then
+            INTERNET_ERROR_FLAG=$$(internet_wait)
+            if [ "$$INTERNET_ERROR_FLAG" -eq 0 ]; then
+              GLUETUN_ERROR_COUNT=$$((GLUETUN_ERROR_COUNT + 1))
+              if [ "$$GLUETUN_ERROR_COUNT" -ge "$$GLUETUN_MAX_ERRORS" ]; then
+                echo "[RESTART] DHT nodes have been zero for $$GLUETUN_ERROR_COUNT checks — restarting gluetun0..."
+                docker restart gluetun0
+                # https://github.com/qdm12/gluetun/issues/1407#issuecomment-2689185679
+                echo "[RESTART] Not designed to restart gluetun connection separately — restarting qbittorrent..."
+                docker restart qbittorrent
+                GLUETUN_ERROR_COUNT=0
+                sleep $$GLUETUN_SLEEP_INTERVAL
+              else
+                echo "[ERROR] ($$GLUETUN_ERROR_COUNT/$$GLUETUN_MAX_ERRORS errors) Both DHT nodes and DL speed are zero"
+              fi
+            fi
+          else
+            echo "[OK] Healthy (either DHT > 0 or DL > 0)"
+            GLUETUN_ERROR_COUNT=0
+          fi
+          # Check every X seconds
+          sleep "$$GLUETUN_SLEEP_INTERVAL"
+        done
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  # Connection for jackett
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    user: 0:0
+    environment:
+      - PUID=0 #400
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - LOG_LEVEL=info
+    networks:
+      bridge_net:
+        ipv4_address: 172.69.0.3
+    ports:
+      - 8191:8191 # port for flaresolverr
+      - 9117:9117 # port for jackett
+      - 9696:9696 # port for prowlarr
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-I", "http://localhost:8191"]
+      start_period: 10s
+      interval: 30s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  jackett:
+    image: linuxserver/jackett:latest # https://github.com/linuxserver/docker-jackett#usage
+    container_name: jackett
+    user: 0:0
+    environment:
+      - PUID=0 #500
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - AUTO_UPDATE=true
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Jackett/.config
+        target: /config
+      - type: bind
+        source: /host_mnt/c/Docker/Jackett/Blackhole
+        target: /downloads
+        #read_only: true
+    network_mode: service:flaresolverr
+    depends_on:
+      flaresolverr:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-I", "http://localhost:9117"]
+      interval: 60s
+      timeout: 15s
+      retries: 10
+    restart: always
+
+  prowlarr:
+    container_name: prowlarr
+    image: ghcr.io/hotio/prowlarr
+    user: 0:0
+    environment:
+      - PUID=0 #600
+      - PGID=0 #1000
+      - UMASK=002
+      - TZ=Etc/GMT
+      - AUTO_UPDATE=true
+    volumes:
+      - type: bind
+        source: /host_mnt/c/Docker/Prowlarr/.config
+        target: /config
+    network_mode: service:flaresolverr
+    # Add FlareSolverr to Indexer Proxies and add the tag "flaresolverr" to proxy and Indexers that use Cloudflare DDoS Protection.
+    depends_on:
+      flaresolverr:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-I", "http://localhost:9696"]
+      interval: 60s
+      timeout: 15s
+      retries: 10
+    restart: unless-stopped

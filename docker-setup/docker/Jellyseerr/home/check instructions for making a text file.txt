@@ -1,0 +1,2 @@
+Password.txt is not very original, but hey, that's what works. Check instructions for Jellyseerr-nginx.
+The file is used as a local user login for Jellyseerr, so don't expose that app to the internet!

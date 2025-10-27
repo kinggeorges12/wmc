@@ -1,0 +1,10 @@
+{
+  "API_KEY": "***REMOVED: delete this line to generate a new key automatically when python container starts***",
+  "FEED_FILE": "/app/data/torrents.json",
+  "FEED_TITLE": "Georznab",
+  "FEED_LINK": "http://localhost:9118",
+  "FEED_IMAGE": "http://localhost:9118/static/banner.jpg",
+  "FEED_DESCRIPTION": "Get yo feed on!",
+  "FEED_LANGUAGE": "en",
+  "WEBHOOK_KEY": "***REMOVED: delete this line to generate a new key automatically when python container starts***"
+}
