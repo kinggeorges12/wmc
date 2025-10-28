@@ -3,3 +3,6 @@ github-token.txt
 password.txt
 *.password
 *password.txt
+
+# Editor/AI assistant artifacts
+.cursor/
