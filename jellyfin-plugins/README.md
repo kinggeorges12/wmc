@@ -24,6 +24,7 @@ These plugins are essential for the core functionality of this setup. JellyBridg
 - **Installation**: See [CustomTabs Installation & Setup](#customtabs-installation--setup)
 - **Catalog**: `https://www.iamparadox.dev/jellyfin/plugins/manifest.json`
 - **Dependencies**: FileTransformation is required for CustomTabs (v2.2.1.0+)
+- **Reverse proxy note**: If you access Jellyfin through `nginx-router`, run the `jellyseerr-nginx` container for URL rewrites. For localhost setups, you can use `http://localhost:5055` directly without this proxy. See [docker-setup/README.md](../docker-setup/README.md#installation), configs in `../docker-setup/docker/Jellyseerr/nginx/`, and `../nginx-router/README.md`.
 - **Links**:
   - [CustomTabs GitHub](https://github.com/IAmParadox27/jellyfin-plugin-custom-tabs)
   - [FileTransformation GitHub](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation)
@@ -69,6 +70,7 @@ This section covers the installation and configuration of CustomTabs for integra
 ### Prerequisites
 - Jellyfin server running
 - Jellyseerr instance running on port 5055
+- If using `nginx-router`, ensure `jellyseerr-nginx` is running for URL rewrites (see [Docker setup](../docker-setup/README.md#installation) and `../nginx-router/README.md`). For localhost, this proxy is not required.
 
 ### Setup Steps
 
